@@ -1,0 +1,22 @@
+// Grants the unprivileged `smartdisplay` app user permission to manage NetworkManager
+// connections. Without this, WifiService.connect() and the AP-mode fallback both fail with
+// "Not authorized to control networking" — polkit denies NetworkManager D-Bus actions to
+// non-root, non-interactive-session users by default, and smartdisplay.service runs as a
+// plain system service (User=smartdisplay), not a logind session.
+//
+// Scoped to only the two actions actually used (activating/deactivating connections, and
+// creating/modifying/deleting system connection profiles) rather than the whole
+// org.freedesktop.NetworkManager.* namespace. NM's polkit actions are not scoped per-connection
+// — settings.modify.system covers every saved profile, not just ones smartdisplay created —
+// so this still can't achieve full connection-level isolation, but it does exclude unrelated
+// grants (hostname control, checkpoint/rollback, wifi-scan policy, etc.) that this feature
+// has no legitimate need for.
+polkit.addRule(function(action, subject) {
+    var allowed = [
+        "org.freedesktop.NetworkManager.network-control",
+        "org.freedesktop.NetworkManager.settings.modify.system",
+    ];
+    if (allowed.indexOf(action.id) !== -1 && subject.user == "smartdisplay") {
+        return polkit.Result.YES;
+    }
+});

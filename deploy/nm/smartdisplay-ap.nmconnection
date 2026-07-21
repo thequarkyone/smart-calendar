@@ -1,0 +1,28 @@
+[connection]
+id=smartdisplay-ap
+uuid=a7b3c4d5-e6f7-8901-2345-678901234567
+type=wifi
+interface-name=wlan0
+autoconnect=false
+
+[wifi]
+mode=ap
+ssid=SmartDisplay-Setup
+band=bg
+channel=6
+
+[wifi-security]
+key-mgmt=wpa-psk
+# Intentionally invalid placeholder — firstboot replaces this with a random PSK.
+# If firstboot fails before patching, wpa-supplicant will reject this and the AP
+# will not start, which is the correct fail-closed behaviour (#18/#19).
+psk=PLACEHOLDER_REPLACED_BY_FIRSTBOOT
+
+[ipv4]
+method=shared
+address1=192.168.4.1/24,192.168.4.1
+
+[ipv6]
+method=ignore
+
+[proxy]

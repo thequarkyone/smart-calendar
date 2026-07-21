@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Runtime data (on-device; never commit)
+/data/
+packages/server/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Vite
+.vite/
+
+# Claude Code internal files (do not commit)
+CLAUDE.md
+plan.md
+memory/
+
+# Image build ephemeral artifacts (cloned tools + output)
+build/.pi-gen/
+build/.custompios/
+build/dist/
+build/base-image*
+build/build.log
+
+# Temp screenshot dumps (mangled Windows temp paths that occasionally land at repo root)
+Users*AppData*/
+
+# Local generated docs / guides
+*.docx

@@ -1,0 +1,16 @@
+[Unit]
+Description=Smart Display AP Fallback (starts SmartDisplay-Setup if no other network)
+# Needs the AP connection's real PSK patched in first, and NetworkManager itself up
+# to query/activate connections. Deliberately not ordered after network-online.target —
+# this unit's whole job is deciding what to do when that target would never be reached.
+After=NetworkManager.service smartdisplay-firstboot.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/smartdisplay-network-fallback.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

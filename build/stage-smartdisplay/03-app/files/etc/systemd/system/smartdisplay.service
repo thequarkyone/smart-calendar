@@ -1,0 +1,33 @@
+[Unit]
+Description=Smart Display Server
+# Deliberately NOT ordered after network-online.target: the server serves the onboarding wizard
+# and AP-mode WiFi setup, which must come up with zero network connectivity. Waiting for
+# network-online would stall startup for the NM-wait-online timeout on a no-network first boot —
+# the exact scenario AP-mode fallback exists to handle.
+After=avahi-daemon.service smartdisplay-firstboot.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=smartdisplay
+WorkingDirectory=/opt/smartdisplay/current
+ExecStart=/usr/bin/node /opt/smartdisplay/current/packages/server/dist/index.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=DATA_DIR=/data
+Environment=INSTALL_DIR=/opt/smartdisplay
+# Systemd hardening (#22)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# /opt/smartdisplay (not just releases/) must be writable: the in-app updater writes the
+# .applying lock file and atomically flips the current -> releases/vX.Y.Z symlink in this dir.
+ReadWritePaths=/data /opt/smartdisplay /tmp
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

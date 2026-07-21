@@ -1,0 +1,25 @@
+[Unit]
+Description=Smart Display Kiosk (Chromium)
+After=smartdisplay-x11.service smartdisplay.service
+Requires=smartdisplay-x11.service
+Wants=smartdisplay.service
+
+[Service]
+Type=simple
+User=smartdisplay
+Environment=DISPLAY=:0
+ExecStartPre=/bin/sleep 3
+ExecStart=/usr/local/bin/smartdisplay-kiosk.sh
+Restart=on-failure
+RestartSec=5
+
+# Memory guardrail for 2GB Pi 4: cap the kiosk cgroup (Chromium + all its child
+# processes) so a leak/spike gets this unit killed and cleanly restarted by
+# systemd, instead of the kernel OOM-killer picking an arbitrary victim
+# (which can take down smartdisplay.service instead).
+MemoryMax=1200M
+MemoryHigh=1000M
+OOMPolicy=kill
+
+[Install]
+WantedBy=multi-user.target

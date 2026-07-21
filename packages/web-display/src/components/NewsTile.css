@@ -1,0 +1,16 @@
+@keyframes news-marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.news-track {
+  display: flex;
+  align-items: center;
+  gap: 3rem;
+  /* width set inline to double the content width for seamless loop */
+  animation: news-marquee 60s linear infinite;
+}
+
+.news-track:hover {
+  animation-play-state: paused;
+}

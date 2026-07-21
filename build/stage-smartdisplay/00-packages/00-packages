@@ -1,0 +1,13 @@
+avahi-daemon
+avahi-utils
+dnsmasq
+network-manager
+chromium-browser
+xserver-xorg
+x11-xserver-utils
+openbox
+unclutter
+curl
+ca-certificates
+git
+sqlite3
