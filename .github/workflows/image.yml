@@ -19,6 +19,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        # ubuntu-latest ships ~30GB of preinstalled toolchains (.NET, Android SDK, GHC, etc.)
+        # that this job never uses, leaving too little free space for a full Raspberry Pi OS
+        # bookworm build (stage0-2 rootfs + our stage + loop-mounted export image). Without
+        # this, pi-gen's export-image stage fails deep into the build with apt reporting
+        # "Cannot allocate memory" from getline — an ENOSPC condition misreported as OOM.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
+
       - name: Install build dependencies
         # Package set mirrors pi-gen's `depends` file. We use qemu-user-static
         # (statically-linked binaries) so arm64 emulation works inside the
