@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # renovate: datasource=github-releases depName=actions/checkout
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9 renovate: datasource=github-releases depName=pnpm/action-setup
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # renovate: datasource=github-releases depName=actions/setup-node
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @smart-display/shared build
+
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      - run: pnpm test

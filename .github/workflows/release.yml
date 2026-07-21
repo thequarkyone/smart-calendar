@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # renovate: datasource=github-releases depName=actions/checkout
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9 renovate: datasource=github-releases depName=pnpm/action-setup
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # renovate: datasource=github-releases depName=actions/setup-node
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump package versions to match tag
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          # Keep all package.json versions in sync with the release tag
+          for pkg in package.json packages/*/package.json; do
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" "$pkg"
+          done
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        # Other workspace packages import @smart-display/shared's compiled dist/, not its source —
+        # typecheck fails with "Cannot find module" without this (matches ci.yml's build step).
+        run: pnpm --filter @smart-display/shared build
+
+      - name: Lint, typecheck and test (release gate)
+        # Do not publish a release built from a commit that fails CI. release.yml runs on tag
+        # push, which is not guaranteed to have gone through ci.yml, so gate here explicitly.
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Register QEMU (arm64 emulation)
+        # The device is arm64 but the runner is x86_64. The server bundles better-sqlite3, a native
+        # N-API addon — its .node binary MUST be built for linux-arm64 or the server crash-loops on
+        # the Pi. Build the shippable artifacts inside an arm64 container so the native binaries and
+        # the resolved node_modules match the target. (Same modern-QEMU approach image.yml uses.)
+        run: docker run --rm --privileged tonistiigi/binfmt --install arm64
+
+      - name: Build arm64 release artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          mkdir -p arm64-out
+          # Work from a clean copy inside the container so the host's x86_64 node_modules / pnpm
+          # store cannot leak into the arm64 build. `pnpm deploy` produces a self-contained
+          # node_modules with REAL files (not the workspace's symlinks-into-.pnpm-store layout,
+          # which would ship as dangling links in a tarball).
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/src:ro -v "$PWD/arm64-out":/out \
+            node:24-bookworm bash -euo pipefail -c '
+              corepack enable
+              mkdir /build && cp -a /src/. /build/ && cd /build
+              rm -rf node_modules packages/*/node_modules
+              pnpm install --frozen-lockfile
+              pnpm build
+              pnpm --filter @smart-display/server deploy --prod /out/server
+              # pnpm deploy follows npm-pack semantics, which may exclude gitignored dist/; copy
+              # the compiled output explicitly for both server and the injected shared package.
+              cp -r packages/server/dist /out/server/dist
+              if [ -d /out/server/node_modules/@smart-display/shared ]; then
+                cp -r packages/shared/dist /out/server/node_modules/@smart-display/shared/dist
+              fi
+              cp -r packages/web-config/dist /out/web-config-dist
+              cp -r packages/web-display/dist /out/web-display-dist
+              chown -R "$(stat -c %u /out):$(stat -c %g /out)" /out
+            '
+
+      - name: Assemble release tarball
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          TARBALL="smart-display-v${VERSION}.tar.gz"
+          STAGING="smart-display-v${VERSION}"
+          mkdir -p "$STAGING/packages/web-config" "$STAGING/packages/web-display"
+          # Server: deployed bundle (dist + package.json + arm64-native node_modules, which already
+          # contains @smart-display/shared).
+          cp -r arm64-out/server "$STAGING/packages/server"
+          cp -r arm64-out/web-config-dist "$STAGING/packages/web-config/dist"
+          cp -r arm64-out/web-display-dist "$STAGING/packages/web-display/dist"
+          tar -czf "$TARBALL" "$STAGING"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "STAGING=$STAGING" >> "$GITHUB_ENV"
+
+      - name: Smoke-test bundle on arm64
+        # Prove the packaged bundle actually boots on the target architecture BEFORE publishing —
+        # this catches both a wrong-arch native module and any missing/dangling files that would
+        # otherwise only surface as a black screen on real hardware.
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD/${STAGING}":/app:ro \
+            node:24-bookworm bash -euo pipefail -c '
+              cd /app/packages/server
+              NODE_ENV=production DATA_DIR=/tmp/sd-data node dist/index.js &
+              pid=$!
+              ok=0
+              for _ in $(seq 1 30); do
+                if curl -sf -o /dev/null http://localhost:3000/; then ok=1; break; fi
+                sleep 1
+              done
+              kill "$pid" 2>/dev/null || true
+              if [ "$ok" != 1 ]; then echo "server bundle failed to boot on arm64" >&2; exit 1; fi
+              echo "arm64 smoke test passed"
+            '
+
+      - name: Compute tarball URL and SHA256
+        run: |
+          echo "TARBALL_URL=https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/smart-display-v${{ steps.version.outputs.VERSION }}.tar.gz" >> "$GITHUB_ENV"
+          echo "SHA256=$(sha256sum "$TARBALL" | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Generate version manifest
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TARBALL_URL: ${{ env.TARBALL_URL }}
+          SHA256: ${{ env.SHA256 }}
+        run: |
+          python3 -c "
+          import json, os
+          manifest = {
+            'version': os.environ['VERSION'],
+            'tarballUrl': os.environ['TARBALL_URL'],
+            'sha256': os.environ['SHA256'],
+            'notes': ''
+          }
+          with open('version.json', 'w') as f:
+            json.dump(manifest, f)
+          "
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          files: |
+            ${{ env.TARBALL }}
+            version.json
+          generate_release_notes: true

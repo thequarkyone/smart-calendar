@@ -1,0 +1,140 @@
+name: Image Build
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-image:
+    # ubuntu-latest (24.04): its debootstrap + host keyring bootstrap a Debian
+    # bookworm chroot correctly. (22.04's debian-archive-keyring is too old for
+    # bookworm and fails debootstrap with "Release signed by unknown key".)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        # Package set mirrors pi-gen's `depends` file. We use qemu-user-static
+        # (statically-linked binaries) so arm64 emulation works inside the
+        # debootstrap chroot. pi-gen's dependency check probes for `qemu-arm`,
+        # which the -static package ships as qemu-arm-static, so we symlink it.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            qemu-user-static binfmt-support kpartx \
+            quilt parted debootstrap zerofree \
+            zip dosfstools e2fsprogs libarchive-tools libcap2-bin \
+            grep rsync xz-utils curl xxd file git kmod bc gpg pigz arch-test \
+            debian-archive-keyring
+          sudo ln -sf /usr/bin/qemu-arm-static /usr/local/bin/qemu-arm
+
+      - name: Register QEMU binfmt handlers (modern static QEMU, F flag)
+        # tonistiigi/binfmt installs a current QEMU (what Docker buildx uses)
+        # and registers the arm64 handler with the F (fix-binary) flag, so
+        # emulated binaries run inside the chroot. We deliberately avoid
+        # multiarch/qemu-user-static here: its bundled QEMU is old and segfaults
+        # (SIGSEGV / -11) byte-compiling arm64 python3.11 during package
+        # post-install (e.g. python3-requests). A modern QEMU fixes that.
+        run: |
+          docker run --rm --privileged tonistiigi/binfmt --install arm64,arm
+
+      - name: Restore pi-gen stage cache
+        # pi-gen's own stage0/1/2 (debootstrap + base Raspberry Pi OS) take
+        # ~25 min and haven't changed in a while — only our stage-smartdisplay
+        # is being iterated on. Cache the whole pi-gen clone+work dir so repeat
+        # runs skip straight to our stage. build/build.sh always discards any
+        # cached stage-smartdisplay work dir, so this never reuses a partial
+        # build of our own stage. Never block the real build on a cache miss.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: build/.pi-gen
+          key: pigen-bookworm-arm64-v1
+
+      - name: Wait for release assets and stage bundled app
+        # The app is bundled into the image at build time (not downloaded on first
+        # boot) so onboarding — including AP-mode WiFi setup, which the app itself
+        # serves — works with zero pre-existing network. release.yml (triggered by
+        # the same tag push) publishes the tarball + version.json; poll for it since
+        # the two workflows run in parallel with no ordering guarantee.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARBALL="smart-display-v${VERSION}.tar.gz"
+          ASSETS_DIR="$(mktemp -d)"
+
+          echo "[image] Waiting for release ${GITHUB_REF_NAME} assets from release.yml..."
+          for i in $(seq 1 60); do
+            if gh release download "${GITHUB_REF_NAME}" --repo "${{ github.repository }}" \
+                 --pattern "version.json" --pattern "$TARBALL" \
+                 --dir "$ASSETS_DIR" --clobber 2>/dev/null \
+               && [[ -f "$ASSETS_DIR/version.json" && -f "$ASSETS_DIR/$TARBALL" ]]; then
+              break
+            fi
+            echo "[image] Assets not ready yet (attempt $i/60), retrying in 15s..."
+            sleep 15
+          done
+
+          if [[ ! -f "$ASSETS_DIR/version.json" || ! -f "$ASSETS_DIR/$TARBALL" ]]; then
+            echo "[image] ERROR: release assets never became available" >&2
+            exit 1
+          fi
+
+          EXPECTED_SHA256="$(python3 -c "import json; print(json.load(open('$ASSETS_DIR/version.json'))['sha256'])")"
+          ACTUAL_SHA256="$(sha256sum "$ASSETS_DIR/$TARBALL" | awk '{print $1}')"
+          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "[image] ERROR: SHA-256 mismatch for $TARBALL (expected $EXPECTED_SHA256, got $ACTUAL_SHA256)" >&2
+            exit 1
+          fi
+
+          STAGE_DIR="build/stage-smartdisplay/03-app/files/opt/smartdisplay/releases/v${VERSION}"
+          mkdir -p "$STAGE_DIR"
+          tar -xzf "$ASSETS_DIR/$TARBALL" -C "$STAGE_DIR" --strip-components=1
+          echo "$VERSION" > "build/stage-smartdisplay/03-app/files/opt/smartdisplay/version"
+          echo "[image] Staged smart-display v${VERSION} for bundling into the image"
+
+      - name: Build image
+        run: |
+          sudo bash build/build.sh
+
+      - name: Fix cache permissions
+        # debootstrap/chroot leave some root-owned files with restrictive
+        # perms; make them readable so the (non-root) cache step can archive
+        # them. Runs even on build failure so stage0/1/2 progress isn't lost.
+        if: always()
+        continue-on-error: true
+        run: sudo chmod -R a+rX build/.pi-gen/work 2>/dev/null || true
+
+      - name: Save pi-gen stage cache
+        # Runs even on failure — if our stage failed but stage0/1/2 completed,
+        # that's still worth caching for the next attempt. The cache key is
+        # immutable once saved once; re-saves under the same key are a no-op.
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: build/.pi-gen
+          key: pigen-bookworm-arm64-v1
+
+      - name: Compress and rename image
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sudo xz -9 -T0 build/dist/smartdisplay.img
+          sudo mv build/dist/smartdisplay.img.xz "smartdisplay-v${VERSION}.img.xz"
+          sudo chown "$(id -u):$(id -g)" "smartdisplay-v${VERSION}.img.xz"
+          echo "IMAGE_XZ=smartdisplay-v${VERSION}.img.xz" >> "$GITHUB_ENV"
+
+      - name: Upload image to release
+        # The release already exists — the "Wait for release assets" step earlier downloaded from it.
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" "${{ env.IMAGE_XZ }}" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
