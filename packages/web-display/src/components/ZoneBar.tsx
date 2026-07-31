@@ -2,7 +2,7 @@ import React from 'react';
 import type { Settings, CalendarState, WeatherState, TasksState, HaState, Tile } from '@smart-display/shared';
 import type { SpotifyState } from '@smart-display/shared';
 
-export type RenderWidgetFn = (widgetId: string, first: boolean) => React.ReactNode;
+export type RenderWidgetFn = (widgetId: string) => React.ReactNode;
 
 /**
  * Generic zone bar that renders a list of widgets either horizontally (row) or
@@ -36,15 +36,17 @@ export function ZoneBar({
     ...(height !== undefined ? { height: `${height}px` } : {}),
     ...(isRow
       ? { padding: '0.5rem 1rem', alignItems: 'center', gap: '1.5rem' }
-      : { padding: '1.5rem 1rem', gap: 0 }),
+      // Cards are now self-contained boxes (border/background) rather than divider-separated
+      // flush content, so they need visible breathing room between them instead of gap: 0.
+      : { padding: '1.5rem 1rem', gap: '0.85rem' }),
     ...borderStyle,
   };
 
   return (
     <div style={containerStyle}>
-      {widgets.map((id, i) => (
+      {widgets.map((id) => (
         <React.Fragment key={id}>
-          {renderWidget(id, i === 0)}
+          {renderWidget(id)}
         </React.Fragment>
       ))}
     </div>

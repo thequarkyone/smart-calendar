@@ -16,6 +16,7 @@ import { MotdTile } from './components/MotdTile.js';
 import { SpotifyTile } from './components/SpotifyTile.js';
 import { CustomTextTile } from './components/CustomTextTile.js';
 import { QrOverlay } from './components/QrOverlay.js';
+import { CARD_STYLE } from './cardStyle.js';
 
 type TemplateId = 'classic' | 'minimal' | 'photo-focus';
 
@@ -298,8 +299,11 @@ export function App() {
   );
 }
 
-const DIVIDER_STYLE = { borderTop: '1px solid var(--divider)', paddingTop: '0.5rem', marginTop: '0.5rem' } as const;
-const EMPTY_STYLE = {} as const;
+// Every sidebar/zone-bar widget gets the same translucent card treatment as calendar day
+// cells, so the display reads as one consistent visual system rather than a mix of boxed
+// and un-boxed elements. Spacing between cards comes from ZoneBar's container gap, not a
+// per-widget divider line, so this no longer needs to special-case the first item.
+const WIDGET_CARD_STYLE: React.CSSProperties = { ...CARD_STYLE, padding: '0.85rem 1rem', boxSizing: 'border-box' };
 
 /** Render a single sidebar widget by tile ID. Returns null if not applicable. */
 function SidebarWidget({
@@ -312,7 +316,6 @@ function SidebarWidget({
   ha,
   spotify,
   now,
-  first,
 }: {
   widgetId: string;
   tileMap: Map<string, Tile>;
@@ -323,13 +326,11 @@ function SidebarWidget({
   ha: HaState | null;
   spotify: import('@smart-display/shared').SpotifyState | null;
   now: Date;
-  first: boolean;
 }) {
-  const divider = !first ? DIVIDER_STYLE : EMPTY_STYLE;
   switch (widgetId) {
     case 'clock':
       return (
-        <div style={first ? {} : divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={getTile(tileMap, 'clock')}>
             <ClockTile settings={settings} now={now} />
           </TileWrapper>
@@ -337,7 +338,7 @@ function SidebarWidget({
       );
     case 'weather':
       return weather ? (
-        <div style={divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={getTile(tileMap, 'weather')}>
             <WeatherTile state={weather} settings={settings} />
           </TileWrapper>
@@ -345,7 +346,7 @@ function SidebarWidget({
       ) : null;
     case 'tasks':
       return tasks && tasks.lists.length > 0 ? (
-        <div style={divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={getTile(tileMap, 'tasks')}>
             <TasksTile state={tasks} />
           </TileWrapper>
@@ -353,7 +354,7 @@ function SidebarWidget({
       ) : null;
     case 'home_assistant':
       return ha && ha.settings.enabled && ha.entities.length > 0 ? (
-        <div style={divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={getTile(tileMap, 'home_assistant')}>
             <HaTile state={ha} touchscreenEnabled={settings.touchscreenEnabled} />
           </TileWrapper>
@@ -363,7 +364,7 @@ function SidebarWidget({
       if (!calendar) return null;
       const agendaTile = getTile(tileMap, 'today_agenda');
       return (
-        <div style={divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={agendaTile}>
             <TodayAgendaTile state={calendar} timezone={settings.timezone} />
           </TileWrapper>
@@ -373,7 +374,7 @@ function SidebarWidget({
     case 'countdown': {
       const cdTile = getTile(tileMap, 'countdown');
       return (
-        <div style={divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={cdTile}>
             <CountdownTile tile={cdTile} timezone={settings.timezone} />
           </TileWrapper>
@@ -383,7 +384,7 @@ function SidebarWidget({
     case 'motd': {
       const motdTile = getTile(tileMap, 'motd');
       return (
-        <div style={divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={motdTile}>
             <MotdTile tile={motdTile} />
           </TileWrapper>
@@ -393,7 +394,7 @@ function SidebarWidget({
     case 'spotify': {
       const spotifyTile = getTile(tileMap, 'spotify');
       return (
-        <div style={divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={spotifyTile}>
             <SpotifyTile state={spotify} />
           </TileWrapper>
@@ -403,7 +404,7 @@ function SidebarWidget({
     case 'custom_text': {
       const ctTile = getTile(tileMap, 'custom_text');
       return (
-        <div style={divider}>
+        <div style={WIDGET_CARD_STYLE}>
           <TileWrapper tile={ctTile}>
             <CustomTextTile tile={ctTile} />
           </TileWrapper>
@@ -459,7 +460,7 @@ function ClassicLayout({
   const tileMap = React.useMemo(() => new Map(tiles.map((t) => [t.id, t])), [tiles]);
 
   /** Renders a single widget — shared by all zone bars. */
-  const renderWidget = React.useCallback((widgetId: string, first: boolean) => (
+  const renderWidget = React.useCallback((widgetId: string) => (
     <SidebarWidget
       widgetId={widgetId}
       tileMap={tileMap}
@@ -470,7 +471,6 @@ function ClassicLayout({
       ha={ha}
       spotify={spotify}
       now={now}
-      first={first}
     />
   ), [tileMap, settings, calendar, weather, tasks, ha, spotify, now]);
 

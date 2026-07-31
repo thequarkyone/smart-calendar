@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { CalendarEvent, CalendarState, EventSymbolRule } from '@smart-display/shared';
+import { CARD_STYLE } from '../cardStyle.js';
 
 interface Props {
   state: CalendarState;
@@ -93,7 +94,7 @@ function shortEventTime(ev: CalendarEvent, timezone: string): string | null {
   return new Date(ev.start).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: timezone });
 }
 
-const MAX_VISIBLE_EVENTS_PER_DAY = 3;
+const MAX_VISIBLE_EVENTS_PER_DAY = 5;
 
 export function CalendarTile({
   state, today, timezone, weekStartsOn = 'sun',
@@ -299,9 +300,7 @@ export function CalendarTile({
                 minHeight: 0,
                 minWidth: 0,
                 aspectRatio: '1',
-                border: '1px solid var(--divider)',
-                borderRadius: '8px',
-                backgroundColor: 'var(--surface)',
+                ...CARD_STYLE,
                 // Whole cell fades slightly for days already past — not just the box background,
                 // the day number and events fade too, so the eye naturally settles on today and
                 // what's ahead. Recomputed from todayStr every render, so this advances on its
