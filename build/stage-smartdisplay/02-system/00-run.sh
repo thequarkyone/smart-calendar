@@ -24,3 +24,13 @@ EOF
 # Overwrite log2ram's default config with our tuned version (after the package
 # install so dpkg doesn't clobber it).
 install -m 644 files/etc/log2ram.conf "${ROOTFS_DIR}/etc/log2ram.conf"
+
+# journald defaults to volatile (RAM-only) storage, so a reboot silently wipes every log —
+# discovered the hard way debugging a multi-day-old weather-freeze bug with zero surviving
+# evidence once the device was rebooted. Persistent storage lives under /var/log/journal,
+# which log2ram already RAM-backs and periodically flushes to disk (see log2ram.conf above),
+# so this doesn't add meaningful SD wear. Capped by both size and age so it can't grow
+# unbounded on a memory-constrained Pi.
+install -d -m 755 "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
+install -m 644 files/etc/systemd/journald.conf.d/10-persistent.conf \
+  "${ROOTFS_DIR}/etc/systemd/journald.conf.d/10-persistent.conf"
